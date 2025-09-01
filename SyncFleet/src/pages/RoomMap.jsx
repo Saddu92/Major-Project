@@ -228,6 +228,8 @@ const RoomMap = ({ room }) => {
   const [sourceCoords, setSourceCoords] = useState(null);
   const [destinationCoords, setDestinationCoords] = useState(null);
   const [hazards, setHazards] = useState([]);
+  const [showStationaryPrompt, setShowStationaryPrompt] = useState(false);
+
 
   // Refs
   const mapRef = useRef();
@@ -239,6 +241,8 @@ const RoomMap = ({ room }) => {
   const stationaryCheckIntervalRef = useRef(null);
   const geolocationWatchId = useRef(null);
   const toastTimeoutRef = useRef(null);
+  const stationaryPromptTimeout = useRef(null);
+
 
   const trailExpiryMs = useMemo(
     () => trailDuration * 60 * 1000,
@@ -394,17 +398,38 @@ const RoomMap = ({ room }) => {
             ...prev,
             [mySocketId]: { ...(prev[mySocketId] || {}), isStationary: false },
           }));
-        } else if (now - lastMovedAtRef.current > STATIONARY_LIMIT) {
-          emitSOS();
-          lastMovedAtRef.current = now;
+          setShowStationaryPrompt(false);
+          clearTimeout(stationaryPromptTimeout.current);
+        } else if (
+          now - lastMovedAtRef.current > STATIONARY_LIMIT &&
+          !showStationaryPrompt
+        ) {
+          // Show confirmation modal! (only once each time stationary)
+          setShowStationaryPrompt(true);
+          stationaryPromptTimeout.current = setTimeout(() => {
+            setShowStationaryPrompt(false);
+            emitSOS();
+          }, 30000); // 30 sec to reply
         }
       } else {
         lastPositionRef.current = newCoords;
         lastMovedAtRef.current = now;
       }
     },
-    [emitSOS, mySocketId]
+    [emitSOS, mySocketId, showStationaryPrompt]
   );
+
+  // Modal confirmation handlers
+  const handleStationaryYes = () => {
+    setShowStationaryPrompt(false);
+    clearTimeout(stationaryPromptTimeout.current);
+    lastMovedAtRef.current = Date.now(); // reset timer
+  };
+  const handleStationaryNo = () => {
+    setShowStationaryPrompt(false);
+    clearTimeout(stationaryPromptTimeout.current);
+    emitSOS();
+  };
 
   const emitLocationUpdate = useCallback(
     (coords) => {
@@ -1028,6 +1053,86 @@ const RoomMap = ({ room }) => {
             }`}
           >
             {toast.message}
+          </div>
+        )}
+
+        {/* --- ADDITION: Stationary Confirmation Modal --- */}
+        {showStationaryPrompt && (
+          <div
+            style={{
+              position: "fixed",
+              left: 0,
+              top: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(0,0,0,.3)",
+              zIndex: 99999,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <div
+              style={{
+                background: "white",
+                borderRadius: "12px",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
+                padding: "32px",
+                minWidth: "320px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                border: "2px solid #ef4444",
+              }}
+            >
+              <IoAlertCircle size={48} color="#ef4444" />
+              <h2
+                style={{ fontWeight: "bold", color: "#ef4444", fontSize: 20 }}
+              >
+                Stationary Detected!
+              </h2>
+              <p style={{ marginTop: 16, fontSize: 16 }}>
+                You've been stationary for over 5 minutes.
+              </p>
+              <p style={{ fontSize: 16, marginBottom: 24 }}>
+                <b>Are you okay?</b>
+              </p>
+              <div style={{ display: "flex", gap: "24px" }}>
+                <button
+                  onClick={handleStationaryYes}
+                  style={{
+                    background: "#10b981",
+                    color: "white",
+                    fontWeight: "bold",
+                    borderRadius: "6px",
+                    padding: "12px 24px",
+                    fontSize: "16px",
+                    border: "none",
+                    outline: "none",
+                  }}
+                >
+                  Yes, I'm OK
+                </button>
+                <button
+                  onClick={handleStationaryNo}
+                  style={{
+                    background: "#dc2626",
+                    color: "white",
+                    fontWeight: "bold",
+                    borderRadius: "6px",
+                    padding: "12px 24px",
+                    fontSize: "16px",
+                    border: "none",
+                    outline: "none",
+                  }}
+                >
+                  No / Need Help
+                </button>
+              </div>
+              <span style={{ marginTop: 16, color: "#ef4444", fontSize: 14 }}>
+                (No response in 30 seconds sends SOS alert to group)
+              </span>
+            </div>
           </div>
         )}
 
